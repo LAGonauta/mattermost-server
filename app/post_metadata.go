@@ -347,7 +347,14 @@ func (a *App) getLinkMetadata(requestURL string, timestamp int64, isNewPost bool
 
 	request.Header.Add("Accept", "text/html, image/*")
 
-	client := a.HTTPService.MakeClient(false)
+	var client *http.Client
+	if (request.URL.Scheme+"://"+request.URL.Host) == a.GetSiteURL() && request.URL.Path == "/api/v4/image" {
+		// Bypass AllowedUntrustedInternalConnections for requests made through the image proxy
+		client = a.HTTPService.MakeClient(true)
+	} else {
+		client = a.HTTPService.MakeClient(false)
+	}
+
 	client.Timeout = time.Duration(*a.Config().ExperimentalSettings.LinkMetadataTimeout) * time.Millisecond
 
 	res, err := client.Do(request)

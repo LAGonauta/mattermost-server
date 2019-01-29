@@ -19,6 +19,7 @@ import (
 
 	"github.com/dyatlov/go-opengraph/opengraph"
 	"github.com/mattermost/mattermost-server/model"
+	"github.com/mattermost/mattermost-server/services/httpservice"
 	"github.com/mattermost/mattermost-server/utils/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1455,6 +1456,11 @@ func TestGetLinkMetadata(t *testing.T) {
 		defer th.TearDown()
 
 		// Fake the SiteURL to have the relative URL resolve to the external server
+		oldSiteURL := *th.App.Config().ServiceSettings.SiteURL
+		defer th.App.UpdateConfig(func(cfg *model.Config) {
+			*cfg.ServiceSettings.SiteURL = oldSiteURL
+		})
+
 		th.App.UpdateConfig(func(cfg *model.Config) {
 			*cfg.ServiceSettings.SiteURL = server.URL
 		})
@@ -1466,6 +1472,42 @@ func TestGetLinkMetadata(t *testing.T) {
 		assert.Nil(t, og)
 		assert.NotNil(t, img)
 		assert.Nil(t, err)
+	})
+
+	t.Run("should error on local addresses other than the image proxy", func(t *testing.T) {
+		th := setup()
+		defer th.TearDown()
+
+		// Disable AllowedUntrustedInternalConnections since it's turned on for the previous tests
+		oldAllowUntrusted := *th.App.Config().ServiceSettings.AllowedUntrustedInternalConnections
+		defer th.App.UpdateConfig(func(cfg *model.Config) {
+			*cfg.ServiceSettings.AllowedUntrustedInternalConnections = oldAllowUntrusted
+		})
+
+		th.App.UpdateConfig(func(cfg *model.Config) {
+			*cfg.ServiceSettings.AllowedUntrustedInternalConnections = ""
+		})
+
+		requestURL := server.URL + "/image?height=200&width=300&name=" + t.Name()
+		timestamp := int64(1547510400000)
+
+		og, img, err := th.App.getLinkMetadata(requestURL, timestamp, false)
+		assert.Nil(t, og)
+		assert.Nil(t, img)
+		assert.NotNil(t, err)
+		assert.IsType(t, &url.Error{}, err)
+		assert.Equal(t, httpservice.AddressForbidden, err.(*url.Error).Err)
+
+		requestURL = th.App.GetSiteURL() + "/api/v4/image?height=200&width=300&name=" + t.Name()
+
+		// Note that this request still fails because the server isn't listening to the APIs while running these tests,
+		// but it doesn't fail because the request is blocked
+		og, img, err = th.App.getLinkMetadata(requestURL, timestamp, false)
+		assert.Nil(t, og)
+		assert.Nil(t, img)
+		assert.NotNil(t, err)
+		assert.IsType(t, &url.Error{}, err)
+		assert.NotEqual(t, httpservice.AddressForbidden, err.(*url.Error).Err)
 	})
 }
 
